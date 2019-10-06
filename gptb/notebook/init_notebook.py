@@ -1,6 +1,3 @@
-from IPython import get_ipython
-ipy = get_ipython()
-
 import sys
 import os
 import time
@@ -8,8 +5,14 @@ import glob
 import itertools
 import socket
 
+jupyter_frontend =  len(sys.argv) >= 1 and bool(int(sys.argv[1]))
+
 ## Matplotlib
-ipy.magic("matplotlib notebook")
+ipy = get_ipython()
+if jupyter_frontend:
+    ipy.magic("matplotlib notebook")
+else:
+    ipy.magic("matplotlib inline")
 
 import numpy as np
 import matplotlib as mpl
@@ -22,25 +25,30 @@ import tqdm
 import skimage
 import torch
 import torchvision
+import yaml
 
 mpl_dpi = mpl.rcParams['figure.dpi']
 
-## Auto reload - Use %autoreload to reload packages
-ipy.magic("load_ext autoreload")
+if not ipy is None:
+    ## Auto reload - Use %autoreload to reload packages
+    ipy.magic("load_ext autoreload")
 
 
-## TQDM
-def _tqdm_replacemnt(*args, **kwargs):
-    kwargs.pop('ncols', None)
-    return tqdm.tqdm_notebook(*args, **kwargs)
+if jupyter_frontend:
+    ## TQDM
+    def _tqdm_notebook(*args, **kwargs):
+        kwargs.pop('ncols', None)
+        return tqdm.tqdm_notebook(*args, **kwargs)
 
 
-tqdm.tqdm = _tqdm_replacemnt
+    tqdm.tqdm_org = tqdm.tqdm
+    tqdm.tqdm = _tqdm_notebook
 
 ## Jupyter widgets
 import ipywidgets as widgets
 
 ## Jupyter display
+import IPython
 import IPython.display
 from IPython.display import display
 
@@ -48,7 +56,6 @@ HTML = lambda x: display(IPython.display.HTML(x))
 Markdown = lambda x: display(IPython.display.Markdown(x))
 Image = lambda x: display(PIL.Image.fromarray(x))
 ImageFile = lambda x: display(IPython.display.Image(x))
-
 
 ## Shortcut to plotimages
 def imshow(img, scale=1, **kwargs):
