@@ -39,9 +39,7 @@ class ModelState:
         self._checkpoints_reservior = None
 
     def save(self, filename=None, is_best=False, add_intermediate=False):
-        if filename is None:
-            filename = os.path.join(self._checkpoints_folder, 'checkpoint.pt')
-
+        ## Prepare dict
         checkpoint = {
             'step': self.step,
             'modules': {},
@@ -62,38 +60,81 @@ class ModelState:
         if self._checkpoints_reservior is not None:
             checkpoint['checkpoints_reservior'] = self._checkpoints_reservior.state_dict()
 
-        if not os.path.isdir(os.path.dirname(filename)):
-            os.makedirs(os.path.dirname(filename))
 
-        torch.save(checkpoint, filename + '.tmp')
-        os.rename(filename + '.tmp', filename)
-
-        if is_best:
-            shutil.copyfile(filename, os.path.join(self._checkpoints_folder, 'checkpoint_best.pt'))
-
-        if add_intermediate:
-            intermetiade_filename = os.path.join(self._checkpoints_folder, 'intermediate', 'checkpoint_{}.pt'.format(self.step))
-            if not os.path.isdir(os.path.dirname(intermetiade_filename)):
-                os.makedirs(os.path.dirname(intermetiade_filename))
-
-            if self._checkpoints_reservior is None:
-                shutil.copyfile(filename, intermetiade_filename)
-            else:
+        if filename is not None:
+            if not os.path.isdir(os.path.dirname(filename)):
+                os.makedirs(os.path.dirname(filename))
+            torch.save(checkpoint, filename + '.tmp')
+            os.rename(filename + '.tmp', filename)
+        else:
+            if add_intermediate and (self._checkpoints_reservior is not None):
                 self.update_reservior()
-                if self.step > self._checkpoints_reservior.last:
-                    _, step_to_remove = self._checkpoints_reservior.add(self.step, self.step)
-                    if step_to_remove is None:
-                        shutil.copyfile(filename, intermetiade_filename)
-                    elif step_to_remove != self.step:
-                        shutil.copyfile(filename, intermetiade_filename)
-                        self.remove_checkpoint(step_to_remove)
+                if not os.path.isdir(os.path.join(self._checkpoints_folder, 'intermediate')):
+                    os.makedirs(os.path.join(self._checkpoints_folder, 'intermediate'))
+
+            filename = os.path.join(self._checkpoints_folder, 'latest_checkpoint_{}.pt'.format(self.step))
+            prev_filename = glob.glob(os.path.join(self._checkpoints_folder, 'latest_checkpoint_*.pt'))
+            if len(prev_filename) == 0:
+                prev_filename = None
+            else:
+                prev_filename = prev_filename[0]
+            prev_was_best = (prev_filename is not None) and (prev_filename[-8:] == '_best.pt')
+
+            ## Save file
+            if not os.path.isdir(os.path.dirname(filename)):
+                os.makedirs(os.path.dirname(filename))
+            torch.save(checkpoint, filename + '.tmp')
+            os.rename(filename + '.tmp', filename)
+
+            if is_best:
+                filename = filename[:-3] + '_best.pt'
+                if prev_was_best:
+                    shutil.move(prev_filename, prev_filename[:-8] + '.pt')
+                    prev_filename = prev_filename[:-8] + '.pt'
+                    prev_was_best = False
+                else:
+                    ## Move previous best to imtermediate folder
+                    prev_best_filename = glob.glob(os.path.join(self._checkpoints_folder, 'checkpoint_*_best.pt'))
+                    if len(prev_best_filename) > 0:
+                        prev_best_filename = prev_best_filename[0]
+                        shutil.move(prev_best_filename, os.path.join(self._checkpoints_folder, 'intermediate', os.path.basename(prev_best_filename)[:-8] + '.pt'))
+
+                    prev_best_filename = glob.glob(os.path.join(self._checkpoints_folder, 'checkpoint_*_best_.pt'))
+                    if len(prev_best_filename) > 0:
+                        prev_best_filename = prev_best_filename[0]
+                        os.remove(prev_best_filename)
+
+            ## Move previous latest to imtermediate folder or keep if best
+            if prev_filename is not None:
+                if not add_intermediate:
+                    if prev_was_best:
+                        shutil.move(prev_filename, os.path.join(os.path.dirname(prev_filename), os.path.basename(prev_filename)[7:-3] + '_.pt'))
+                    else:
+                        os.remove(prev_filename)
+                else:
+                    if prev_was_best:
+                        shutil.move(prev_filename, os.path.join(self._checkpoints_folder, os.path.basename(prev_filename)[7:]))
+                        prev_step = int(os.path.basename(prev_filename)[18:-8])
+                    else:
+                        shutil.move(prev_filename, os.path.join(self._checkpoints_folder, 'intermediate', os.path.basename(prev_filename)[7:]))
+                        prev_step = int(os.path.basename(prev_filename)[18:-3])
+                    if self._checkpoints_reservior is not None:
+                        if prev_step > self._checkpoints_reservior.last:
+                            _, step_to_remove = self._checkpoints_reservior.add(prev_step, prev_step)
+                            if step_to_remove is not None:
+                                self.remove_checkpoint(step_to_remove)
 
     def load(self, filename=None, device_id=None, checkpoint=None):
         if checkpoint is None:
             if filename is None:
-                filename = os.path.join(self._checkpoints_folder, 'checkpoint.pt')
-                if not os.path.isfile(filename):
-                    return None
+                filename = glob.glob(os.path.join(self._checkpoints_folder, 'latest_checkpoint_*.pt'))
+                if len(filename) > 0:
+                    filename = filename[0]
+                else:
+                    if os.path.isfile(os.path.join(self._checkpoints_folder, 'checkpoint.pt')):
+                        filename = os.path.join(self._checkpoints_folder, 'checkpoint.pt')
+                    else:
+                        return None
 
             if device_id is None:
                 checkpoint = torch.load(filename)
@@ -137,7 +178,7 @@ class ModelState:
             if kwargs['data'] != checkpoints_steps:
                 kwargs['data'] = checkpoints_steps
                 kwargs['indices'] = checkpoints_steps
-                if (kwargs['last_proposal'] is None) or (kwargs['last_proposal'] < max(checkpoints_steps)):
+                if (len(checkpoints_steps) > 0) and ((kwargs['last_proposal'] is None) or (kwargs['last_proposal'] < max(checkpoints_steps))):
                     kwargs['last_proposal'] = max(checkpoints_steps)
                 self._checkpoints_reservior = Resevior(**kwargs)
 
@@ -159,11 +200,30 @@ class ModelState:
         
 
     def load_step(self, step, device_id=None, checkpoint=None):
-        filename = os.path.join(self._checkpoints_folder, 'intermediate', 'checkpoint_{}.pt'.format(step))
+        if os.path.isfile(os.path.join(self._checkpoints_folder, 'latest_checkpoint_{}.pt'.format(step))):
+            filename = os.path.join(self._checkpoints_folder, 'latest_checkpoint_{}.pt'.format(step))
+        elif os.path.isfile(os.path.join(self._checkpoints_folder, 'latest_checkpoint_{}_best.pt'.format(step))):
+            filename = os.path.join(self._checkpoints_folder, 'latest_checkpoint_{}_best.pt'.format(step))
+        elif os.path.isfile(os.path.join(self._checkpoints_folder, 'checkpoint_{}_best.pt'.format(step))):
+            filename = os.path.join(self._checkpoints_folder, 'checkpoint_{}_best.pt'.format(step))
+        elif os.path.isfile(os.path.join(self._checkpoints_folder, 'checkpoint_{}_best_.pt'.format(step))):
+            filename = os.path.join(self._checkpoints_folder, 'checkpoint_{}_best_.pt'.format(step))
+        else:
+            filename = os.path.join(self._checkpoints_folder, 'intermediate', 'checkpoint_{}.pt'.format(step))
+
         return self.load(filename, device_id=device_id, checkpoint=checkpoint)
 
     def load_best(self, device_id=None, checkpoint=None):
-        filename = os.path.join(self._checkpoints_folder, 'checkpoint_best.pt')
+        filename = glob.glob(os.path.join(self._checkpoints_folder, '*_best.pt'))
+        if len(filename) > 0:
+            filename = filename[0]
+        else:
+            filename = glob.glob(os.path.join(self._checkpoints_folder, '*_best_.pt'))
+            if len(filename) > 0:
+                filename = filename[0]
+            else:
+                return None
+
         return self.load(filename, device_id=device_id, checkpoint=checkpoint)
 
     # def to_device(self, device_id):
@@ -176,12 +236,20 @@ class ModelState:
             matches = map(lambda x: re.match('^checkpoint_(\\d+)\\.pt$', x),
                         os.listdir(os.path.join(self._checkpoints_folder, 'intermediate')))
             checkpoints_steps = sorted([int(x.groups()[0]) for x in matches if x is not None])
+
+        checkpoint_filenames = glob.glob(os.path.join(self._checkpoints_folder, 'checkpoint_*_best.pt'))
+        for checkpoint_filename in checkpoint_filenames:
+            checkpoints_steps.append(int(os.path.basename(checkpoint_filename)[11:-8]))
         return checkpoints_steps
 
     def remove_checkpoint(self, step):
         filename = os.path.join(self._checkpoints_folder, 'intermediate', 'checkpoint_{}.pt'.format(step))
         if os.path.isfile(filename):
             os.remove(filename)
+
+        filename = os.path.join(self._checkpoints_folder, 'checkpoint_{}_best.pt'.format(step))
+        if os.path.isfile(filename):
+            shutil.move(filename, filename[:-3] + '_.pt')
 
     def increment(self):
         self.step += 1
