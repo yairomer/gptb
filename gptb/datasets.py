@@ -17,6 +17,8 @@ def load_dataset(dataset_name, *args, **kwargs):
         dataset = load_mnist(*args, **kwargs)
     elif dataset_name == 'celeba':
         dataset = load_celeba(*args, **kwargs)
+    elif dataset_name == 'cifar10':
+        dataset = load_cifar10(*args, **kwargs)
     elif dataset_name == 'fixed_imagenet':
         dataset = load_fixed_image_net(*args, **kwargs)
     elif dataset_name == 'files':
@@ -203,6 +205,45 @@ def load_celeba(data_folder,
         transform = torchvision.transforms.Compose(transform)
 
         dataset = torchvision.datasets.CelebA(data_folder, split=split, target_type=target_type, transform=transform, download=download)
+
+        dataset = DatasetWrapper(dataset, drop_labels=drop_labels, store_used_after=store_used)
+
+        return dataset
+
+
+def load_cifar10(data_folder,
+                 split='train',
+                 drop_labels=False,
+                 store_used=True,
+                 use_grayscale=False,
+                 n_samples_train=None,
+                 n_samples_val=256,
+                 additional_transform=None,
+                 download=False,
+                 rand_seed=0,
+                 ):
+
+        rand_gen = np.random.RandomState(rand_seed)
+        
+        transform = []
+        if use_grayscale:
+            transform += [torchvision.transforms.Grayscale()]
+        if additional_transform is not None:
+            transform += additional_transform 
+        transform += [torchvision.transforms.ToTensor()]
+        transform = torchvision.transforms.Compose(transform)
+
+        dataset = torchvision.datasets.CIFAR10(data_folder, train=(split in ('train', 'val')), transform=transform, download=download)
+
+        if (n_samples_val is not None) or (n_samples_train is not None):
+            if n_samples_train is None:
+                n_samples_train = len(dataset) - n_samples_val
+
+            indices = rand_gen.permutation(len(dataset))
+            if split == 'train':
+                dataset = torch.utils.data.Subset(dataset, indices[:n_samples_train])
+            elif split == 'val':
+                dataset = torch.utils.data.Subset(dataset, indices[-n_samples_val:])
 
         dataset = DatasetWrapper(dataset, drop_labels=drop_labels, store_used_after=store_used)
 
