@@ -614,16 +614,19 @@ def weight_init(m):
                 init.orthogonal_(param.data)
             else:
                 init.normal_(param.data)
-    elif isinstance(m, (nn.Sequential,
-                        nn.Dropout,
+    elif isinstance(m, (nn.Dropout,
                         nn.ReLU,
+                        nn.ELU,
                         nn.LeakyReLU,
                         nn.Sigmoid,
                         nn.Tanh,
                         nn.MaxPool2d,
+                        nn.AvgPool2d,
                         nn.InstanceNorm2d,
-                        nn.ModuleList,
+                        nn.Embedding,
                         )):
+        pass
+    elif len(m._modules) > 0:
         pass
     else:
         print("!! Warning: {} has no deafault initialization scheme".format(type(m)))
