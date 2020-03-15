@@ -68,3 +68,10 @@ def imshow(img, scale=1, **kwargs):
     img_image = ax.imshow(img, **kwargs)
 
     return fig, ax, img_image
+
+
+## Initialize Plotly
+import plotly
+import plotly.graph_objs as go
+import plotly.figure_factory as ff
+plotly.offline.init_notebook_mode(connected=True)
