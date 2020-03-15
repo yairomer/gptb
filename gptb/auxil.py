@@ -4,6 +4,12 @@ import time
 import numpy as np
 import torch
 
+try:
+    profile_func = profile
+except NameError:
+    def profile_func(func):
+        return func
+
 class CountDowner:
     def __init__(self, interval):
         self._interval = interval
