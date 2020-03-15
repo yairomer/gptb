@@ -11,10 +11,12 @@ except NameError:
         return func
 
 class CountDowner:
-    def __init__(self, interval):
+    def __init__(self, interval, reset=False):
         self._interval = interval
         self._last_reset = 0
-    
+        if reset:
+            self.reset()
+
     def __bool__(self):
         return time.time() >  self._last_reset + self._interval
 
