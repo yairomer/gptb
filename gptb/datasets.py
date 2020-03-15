@@ -35,13 +35,16 @@ class DatasetWrapper:
                  store_used_before=False,
                  store_used_after=False,
                  asumme_fixed_size=False,
-                 transform=None):
+                 transform=None,
+                 to_device=None,
+                 ):
 
         self._dataset = dataset
         self._transform = transform
         self._drop_labels = drop_labels
         self._store_used_before = store_used_before
         self._store_used_after = store_used_after
+        self._to_device = to_device
 
         if self._store_used_before or self._store_used_after:
             self._was_used = np.zeros(len(self._dataset), dtype=bool)
@@ -53,14 +56,14 @@ class DatasetWrapper:
         if self._store_used_before:
             if asumme_fixed_size:
                 data = self._dataset[0][0]
-                self._used_data = torch.zeros((len(self._dataset), ) + data.shape, dtype=data.dtype)
+                self._used_data = torch.zeros((len(self._dataset), ) + data.shape, dtype=data.dtype, device=self._to_device or 'cpu')
             else:
                 self._used_data = [None] * len(self._dataset)
         elif self._store_used_after:
             data = self._dataset[0][0]
             if self._transform is not None:
                 data = self._transform(data)
-            self._used_data = torch.zeros((len(self._dataset), ) + data.shape, dtype=data.dtype)
+            self._used_data = torch.zeros((len(self._dataset), ) + data.shape, dtype=data.dtype, device=self._to_device or 'cpu')
         else:
             self._used_data = None
     
@@ -81,6 +84,9 @@ class DatasetWrapper:
 
             if self._transform is not None:
                 data = self._transform(data)
+
+            if self._to_device is not None:
+                data = data.to(self._to_device)
 
             if self._store_used_after:
                 self._used_data[index] = data
@@ -185,6 +191,7 @@ def load_celeba(data_folder,
                 drop_labels=False,
                 store_used=True,
                 download=False,
+                to_device=None,
                 rand_seed=0,
                 ):
 
@@ -206,7 +213,7 @@ def load_celeba(data_folder,
 
         dataset = torchvision.datasets.CelebA(data_folder, split=split, target_type=target_type, transform=transform, download=download)
 
-        dataset = DatasetWrapper(dataset, drop_labels=drop_labels, store_used_after=store_used)
+        dataset = DatasetWrapper(dataset, drop_labels=drop_labels, store_used_after=store_used, to_device=to_device)
 
         return dataset
 
@@ -299,16 +306,25 @@ def load_fixed_image_net(data_folder,
 
 
 class Files:
-    def __init__(self, files):
+    def __init__(self, files, minimal_width=None, minimal_height=None):
         self._files = glob.glob(files)
         self._files.sort()
+        if (minimal_width is not None) or (minimal_height is not None):
+            if minimal_width is None:
+                minimal_width = 0
+            if minimal_height is None:
+                minimal_height = 0
+            files = []
+            for img_file in self._files:
+                img_shape = PIL.Image.open(img_file).size
+                if (img_shape[1] >= minimal_height) and (img_shape[0] >= minimal_width):
+                    files.append(img_file)
+            self._files = files
         self._transform = torchvision.transforms.ToTensor()
 
     def __getitem__(self, index):
         img_pil = PIL.Image.open(self._files[index])
         img = self._transform(img_pil)
-        if img.shape[1] > img.shape[2]:
-            img = img.transpose(1, 2)
         return img
     
     def __len__(self):
