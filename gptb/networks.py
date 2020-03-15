@@ -10,6 +10,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.init as init
+from torch.utils.tensorboard import SummaryWriter
 import tensorboardX
 import tensorflow as tf
 import imageio
@@ -19,12 +20,17 @@ from .auxil import Resevior
 class ModelState:
     def __init__(self,
                  checkpoints_folder=None,
-                 modules={},
-                 tensors={},
-                 arrays={},
-                 metadata={},
+                 modules=None,
+                 tensors=None,
+                 arrays=None,
+                 metadata=None,
                  reset_folders=False,
                  ):
+
+        modules = {} if modules is None else modules
+        tensors = {} if tensors is None else tensors
+        arrays = {} if arrays is None else arrays
+        metadata = {} if metadata is None else metadata
 
         ## Define parameters
         ## =================
@@ -752,17 +758,19 @@ def get_tensorboard_logger(folder,
     else:
         logger.info('Running tensorboard at port {}'.format(port))
     cmd = ['tensorboard',
-            '--port', str(port),
-            '--logdir', folder,
-            '--samples_per_plugin', 'images=100',
-            '--reload_interval=5',
-            ]
+           '--bind_all', 
+           '--port', str(port),
+           '--logdir', folder,
+           '--samples_per_plugin', 'images=100',
+           '--reload_interval=5',
+           ]
     if in_background:
         subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
     else:
         subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
 
-    return tensorboardX.SummaryWriter(folder)
+    # return tensorboardX.SummaryWriter(folder)
+    return SummaryWriter(folder)
 
 def scalar_from_tensorboard(folder, tag):
     tensorboard_filename = glob.glob(os.path.join(folder, 'events.out.tfevents.*'))[0]
