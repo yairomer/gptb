@@ -835,3 +835,20 @@ def gif_from_tensorboard(gif_filename, folder, tag, step=1, fps=3, repeat_last=0
                         index += 1
             for _ in range(repeat_last):
                 writer.append_data(image)
+
+class EncapsulatedRandomState:
+    def __init__(self, random_seed=0, devices_list=[]):
+        self._random_seed = random_seed
+        self._devices_list = devices_list
+        self._torch_rng_state = [torch.random.get_rng_state()]
+        for device_id in self._devices_list:
+            self._torch_rng_state.append(torch.cuda.get_rng_state(device_id))
+        torch.random.manual_seed(random_seed)
+
+    def __enter__(self):
+        return np.random.RandomState(self._random_seed)
+
+    def __exit__(self, type, value, traceback):
+        torch.random.set_rng_state(self._torch_rng_state[0])
+        for device_id, rng_state in zip(self._devices_list, self._torch_rng_state[1:]):
+            torch.cuda.set_rng_state(rng_state, device_id)
