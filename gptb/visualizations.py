@@ -10,25 +10,19 @@ import matplotlib.pyplot as plt
 import imageio
 import visdom
 
-def start_visdom(initial_port=9960, *args, **kwargs):
-    port = initial_port
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    success = False
-    while not success:
+def start_visdom(*args, port=9960, **kwargs):
         try:
-            sock.bind(('127.0.0.1', port))
-            success = True
+        vis = visdom.Visdom(port=port, raise_exceptions=True, *args, **kwargs)
         except:
-            port += 1
-    sock.close()
     print('\nRunning visdom at port {}\n'.format(port))
     cmd = ['visdom',
             '-p', str(port),
             ]
     subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
     time.sleep(3)
-
     vis = visdom.Visdom(port=port, *args, **kwargs)
+
+    print('Connected to visdom at port {}\n'.format(port))
     return vis
 
 class Images2MultiGrid:
