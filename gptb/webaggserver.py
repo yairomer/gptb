@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_webagg import WebAggApplication
 from tornado.ioloop import IOLoop
 
-def start_webagg_server():
+def start_webagg_server(intial_port=9950):
     ## Set matplotlib's backend
     plt.switch_backend('webagg')
 
@@ -16,7 +16,7 @@ def start_webagg_server():
 
     ## Start web server
     app = WebAggApplication()
-    port = 9950
+    port = intial_port
     while True:
         try:
             app.listen(port, address='0.0.0.0')
