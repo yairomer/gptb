@@ -5,13 +5,13 @@ import subprocess
 import socket
 import glob
 import re
+import logging
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.init as init
 from torch.utils.tensorboard import SummaryWriter
-import tensorboardX
 import tensorflow as tf
 import imageio
 
@@ -718,7 +718,9 @@ def add_indicies(dataset_class):
 
     return IndexedDataset
 
-def rm_tensorboard_folder(folder):
+def rm_tensorboard_folder(folder, logger=None):
+    logger = logger if logger is not None else logging.getLogger('gptb_basic')
+
     if folder is not None and os.path.isdir(folder):
 
         ## Shutdown existing tensorboards
@@ -730,11 +732,13 @@ def rm_tensorboard_folder(folder):
             line = line.decode("utf-8").strip().split(None, len(headers) - 1)
             cmd = line[cmd_index]
             if ('tensorboard' in cmd) and (folder in cmd):
-                print('Killing process: {}'.format(' '.join(line)))
                 pid = int(line[pid_index])
+                logger.info('Killing process: {}'.format(pid))
+                logger.debug('Killed process details:'.format(' '.join(line)))
                 os.kill(pid, 9)
                 time.sleep(5)
 
+        logger.info('Removing folder: "{}"'.format(folder))
         shutil.rmtree(folder)
 
 def get_tensorboard_logger(folder,
@@ -743,6 +747,21 @@ def get_tensorboard_logger(folder,
                            initial_port=9970,
                            logger=None,
                            ):
+
+    ## Shutdown existing tensorboards
+    ps = subprocess.Popen(['ps', 'aux'], stdout=subprocess.PIPE).stdout.readlines()
+    headers = ps[0].decode("utf-8").strip().split()
+    cmd_index = headers.index('COMMAND')
+    pid_index = headers.index('PID')
+    for line in ps[1:]:
+        line = line.decode("utf-8").strip().split(None, len(headers) - 1)
+        cmd = line[cmd_index]
+        if ('tensorboard' in cmd) and (folder in cmd):
+            print('Killing process: {}'.format(' '.join(line)))
+            pid = int(line[pid_index])
+            os.kill(pid, 9)
+            time.sleep(5)
+
     port = initial_port
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     success = False
@@ -758,7 +777,7 @@ def get_tensorboard_logger(folder,
     else:
         logger.info('Running tensorboard at port {}'.format(port))
     cmd = ['tensorboard',
-           '--bind_all', 
+        #    '--bind_all', 
            '--port', str(port),
            '--logdir', folder,
            '--samples_per_plugin', 'images=100',
