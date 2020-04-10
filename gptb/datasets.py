@@ -7,7 +7,6 @@ import torchvision
 import PIL
 
 import numpy as np
-import tqdm
 
 def load_dataset(dataset_name, *args, **kwargs):
     dataset_name = dataset_name.lower()
@@ -66,15 +65,15 @@ class DatasetWrapper:
             self._used_data = torch.zeros((len(self._dataset), ) + data.shape, dtype=data.dtype, device=self._to_device or 'cpu')
         else:
             self._used_data = None
-    
+
     def __getitem__(self, index):
         if self._store_used_after and self._was_used[index]:
             data = self._used_data[index]
             label = self._used_labels[index]
         else:
             if self._store_used_before and self._was_used[index]:
-                raw_data = self._used_data[index]
-                raw_label = self._used_labels[index]
+                data = self._used_data[index]
+                label = self._used_labels[index]
             else:
                 data, label = self._dataset[index]
                 if self._store_used_before:
@@ -115,21 +114,20 @@ def load_spiral(n_rounds=2,
                 rand_seed=0,
                 ):
 
-        if isinstance(rand_seed, np.random.RandomState):
-            rand_gen = rand_seed
-        else:
-            rand_gen = np.random.RandomState(rand_seed)
+    if isinstance(rand_seed, np.random.RandomState):  # pylint: disable=no-member
+        rand_gen = rand_seed
+    else:
+        rand_gen = np.random.RandomState(rand_seed)  # pylint: disable=no-member
 
-        t = rand_gen.rand(n_samples)
-        r = t * scale
-        theta = t * n_rounds * 2 * np.pi
-        data = np.stack((r * np.cos(theta), r * np.sin(theta)), axis=1)
-        data += rand_gen.randn(n_samples, 2) * noise_std
-        dataset = torch.utils.data.TensorDataset(torch.tensor(data, dtype=torch.float))
-        return dataset
+    t = rand_gen.rand(n_samples)
+    r = t * scale
+    theta = t * n_rounds * 2 * np.pi
+    data = np.stack((r * np.cos(theta), r * np.sin(theta)), axis=1)
+    data += rand_gen.randn(n_samples, 2) * noise_std
+    dataset = torch.utils.data.TensorDataset(torch.tensor(data, dtype=torch.float))  # pylint: disable=not-callable
+    return dataset
 
-def generate_spiral_line(self,
-                         n_rounds=2,
+def generate_spiral_line(n_rounds=2,
                          scale=1,
                          n_points=1000,
                          ):
@@ -144,78 +142,75 @@ def generate_spiral_line(self,
 def load_mnist(data_folder,
                split='train',
                n_samples_val=256,
-               drop_labels=False,
+               #  drop_labels=False,
                rand_seed=0,
                ):
 
-        rand_gen = np.random.RandomState(rand_seed)
-        
-        if split in ['train', 'val']:
-            images_filename = os.path.join(data_folder, 'train-images-idx3-ubyte')
-            labels_filename = os.path.join(data_folder, 'train-labels-idx1-ubyte')
-        else:
-            images_filename = os.path.join(data_folder, 't10k-images-idx3-ubyte')
-            labels_filename = os.path.join(data_folder, 't10k-labels-idx1-ubyte')
+    rand_gen = np.random.RandomState(rand_seed)  # pylint: disable=no-member
 
-        with open(images_filename, 'rb') as fid:
-            _, num, rows, cols = struct.unpack(">IIII", fid.read(16))
-            images = np.fromfile(fid, dtype=np.uint8).reshape(-1, rows, cols)
+    if split in ['train', 'val']:
+        images_filename = os.path.join(data_folder, 'train-images-idx3-ubyte')
+        # labels_filename = os.path.join(data_folder, 'train-labels-idx1-ubyte')
+    else:
+        images_filename = os.path.join(data_folder, 't10k-images-idx3-ubyte')
+        # labels_filename = os.path.join(data_folder, 't10k-labels-idx1-ubyte')
 
-        with open(labels_filename, 'rb') as fid:
-            _, num = struct.unpack(">II", fid.read(8))
-            labels = np.fromfile(fid, dtype=np.int8)
+    with open(images_filename, 'rb') as fid:
+        _, _, rows, cols = struct.unpack(">IIII", fid.read(16))
+        images = np.fromfile(fid, dtype=np.uint8).reshape(-1, rows, cols)
 
-        images /= 255.
+    # with open(labels_filename, 'rb') as fid:
+    #     _, num = struct.unpack(">II", fid.read(8))
+    #     labels = np.fromfile(fid, dtype=np.int8)
 
-        dataset = torch.utils.data.TensorDataset(torch.tensor(images[:, None, :, :], dtype=torch.float))
+    images /= 255.
 
-        if split == 'train':
-            indices = rand_gen.permutation(len(dataset))[:-n_samples_val]
-            dataset = torch.utils.data.Subset(dataset, indices)
-        elif split == 'val':
-            indices = rand_gen.permutation(len(dataset))[-n_samples_val:]
-            dataset = torch.utils.data.Subset(dataset, indices)
+    dataset = torch.utils.data.TensorDataset(torch.tensor(images[:, None, :, :], dtype=torch.float))  # pylint: disable=not-callable
 
-        if drop_labels:
-            dataset = DatasetWrapper(dataset, drop_labels=drop_labels)
+    if split == 'train':
+        indices = rand_gen.permutation(len(dataset))[:-n_samples_val]
+        dataset = torch.utils.data.Subset(dataset, indices)
+    elif split == 'val':
+        indices = rand_gen.permutation(len(dataset))[-n_samples_val:]
+        dataset = torch.utils.data.Subset(dataset, indices)
 
-        return dataset
+    # if drop_labels:
+    #     dataset = DatasetWrapper(dataset, drop_labels=drop_labels)
+
+    return dataset
 
 
 def load_celeba(data_folder,
                 split='train',
                 crop_size=178,
                 resize_to=64,
-                target_type=['attr', 'identity', 'bbox', 'landmarks'],
+                target_type=('attr', 'identity', 'bbox', 'landmarks'),
                 use_grayscale=False,
                 drop_labels=False,
                 store_used=True,
                 download=False,
                 to_device=None,
-                rand_seed=0,
                 ):
 
-        ## torchvision adds the celeba folder to the path
-        data_folder = os.path.abspath(data_folder)
-        assert os.path.basename(data_folder) == 'celeba',  'data_folder name must end with "celeba"'
-        data_folder = os.path.abspath(os.path.join(data_folder, '../'))
+    ## torchvision adds the celeba folder to the path
+    data_folder = os.path.abspath(data_folder)
+    assert os.path.basename(data_folder) == 'celeba', 'data_folder name must end with "celeba"'
+    data_folder = os.path.abspath(os.path.join(data_folder, '../'))
 
-        rand_gen = np.random.RandomState(rand_seed)
-        
-        transform = [
-            torchvision.transforms.CenterCrop(crop_size),
-            torchvision.transforms.Resize(resize_to),
-            torchvision.transforms.ToTensor(),
-            ]
-        if use_grayscale:
-            transform = transform[:-1] + [torchvision.transforms.Grayscale()] + transform[-1:]
-        transform = torchvision.transforms.Compose(transform)
+    transform = [
+        torchvision.transforms.CenterCrop(crop_size),
+        torchvision.transforms.Resize(resize_to),
+        torchvision.transforms.ToTensor(),
+        ]
+    if use_grayscale:
+        transform = transform[:-1] + [torchvision.transforms.Grayscale()] + transform[-1:]
+    transform = torchvision.transforms.Compose(transform)
 
-        dataset = torchvision.datasets.CelebA(data_folder, split=split, target_type=target_type, transform=transform, download=download)
+    dataset = torchvision.datasets.CelebA(data_folder, split=split, target_type=target_type, transform=transform, download=download)
 
-        dataset = DatasetWrapper(dataset, drop_labels=drop_labels, store_used_after=store_used, to_device=to_device)
+    dataset = DatasetWrapper(dataset, drop_labels=drop_labels, store_used_after=store_used, to_device=to_device)
 
-        return dataset
+    return dataset
 
 
 def load_cifar10(data_folder,
@@ -225,36 +220,40 @@ def load_cifar10(data_folder,
                  use_grayscale=False,
                  n_samples_train=None,
                  n_samples_val=256,
+                 normalize=False,
                  additional_transform=None,
                  download=False,
+                 to_device=None,
                  rand_seed=0,
                  ):
 
-        rand_gen = np.random.RandomState(rand_seed)
-        
-        transform = []
-        if use_grayscale:
-            transform += [torchvision.transforms.Grayscale()]
-        if additional_transform is not None:
-            transform += additional_transform 
-        transform += [torchvision.transforms.ToTensor()]
-        transform = torchvision.transforms.Compose(transform)
+    rand_gen = np.random.RandomState(rand_seed)  # pylint: disable=no-member
 
-        dataset = torchvision.datasets.CIFAR10(data_folder, train=(split in ('train', 'val')), transform=transform, download=download)
+    transform = []
+    if use_grayscale:
+        transform += [torchvision.transforms.Grayscale()]
+    if additional_transform is not None:
+        transform += additional_transform
+    transform += [torchvision.transforms.ToTensor()]
+    if normalize:
+        transform += [torchvision.transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
+    transform = torchvision.transforms.Compose(transform)
 
-        if (n_samples_val is not None) or (n_samples_train is not None):
-            if n_samples_train is None:
-                n_samples_train = len(dataset) - n_samples_val
+    dataset = torchvision.datasets.CIFAR10(data_folder, train=(split in ('train', 'val')), transform=transform, download=download)
 
-            indices = rand_gen.permutation(len(dataset))
-            if split == 'train':
-                dataset = torch.utils.data.Subset(dataset, indices[:n_samples_train])
-            elif split == 'val':
-                dataset = torch.utils.data.Subset(dataset, indices[-n_samples_val:])
+    if (n_samples_val is not None) or (n_samples_train is not None):
+        if n_samples_train is None:
+            n_samples_train = len(dataset) - n_samples_val
 
-        dataset = DatasetWrapper(dataset, drop_labels=drop_labels, store_used_after=store_used)
+        indices = rand_gen.permutation(len(dataset))
+        if split == 'train':
+            dataset = torch.utils.data.Subset(dataset, indices[:n_samples_train])
+        elif split == 'val':
+            dataset = torch.utils.data.Subset(dataset, indices[-n_samples_val:])
 
-        return dataset
+    dataset = DatasetWrapper(dataset, drop_labels=drop_labels, store_used_after=store_used, to_device=to_device)
+
+    return dataset
 
 
 def load_fixed_image_net(data_folder,
@@ -270,39 +269,39 @@ def load_fixed_image_net(data_folder,
                          additional_transform=None,
                          ):
 
-        rand_gen = np.random.RandomState(rand_seed)
-        
-        transform = []
-        if resize:
-            transform += [torchvision.transforms.Resize(image_size)]
-            transform += [torchvision.transforms.CenterCrop(image_size)]
-        else:
-            transform += [torchvision.transforms.RandomCrop(image_size, pad_if_needed=True, padding_mode='edge')]
-        if use_grayscale:
-            transform += [torchvision.transforms.Grayscale()]
-        if additional_transform is not None:
-            transform += additional_transform 
-        transform += [torchvision.transforms.ToTensor()]
-        transform = torchvision.transforms.Compose(transform)
+    rand_gen = np.random.RandomState(rand_seed)  # pylint: disable=no-member
 
-        dataset = torchvision.datasets.ImageFolder(
-            os.path.join(data_folder, 'train' if split in ('train', 'val') else 'val'),
-            transform=transform,
-            )
+    transform = []
+    if resize:
+        transform += [torchvision.transforms.Resize(image_size)]
+        transform += [torchvision.transforms.CenterCrop(image_size)]
+    else:
+        transform += [torchvision.transforms.RandomCrop(image_size, pad_if_needed=True, padding_mode='edge')]
+    if use_grayscale:
+        transform += [torchvision.transforms.Grayscale()]
+    if additional_transform is not None:
+        transform += additional_transform
+    transform += [torchvision.transforms.ToTensor()]
+    transform = torchvision.transforms.Compose(transform)
 
-        if (n_samples_val is not None) or (n_samples_train is not None):
-            if n_samples_train is None:
-                n_samples_train = len(dataset) - n_samples_val
+    dataset = torchvision.datasets.ImageFolder(
+        os.path.join(data_folder, 'train' if split in ('train', 'val') else 'val'),
+        transform=transform,
+        )
 
-            indices = rand_gen.permutation(len(dataset))
-            if split == 'train':
-                dataset = torch.utils.data.Subset(dataset, indices[:n_samples_train])
-            elif split == 'val':
-                dataset = torch.utils.data.Subset(dataset, indices[-n_samples_val:])
+    if (n_samples_val is not None) or (n_samples_train is not None):
+        if n_samples_train is None:
+            n_samples_train = len(dataset) - n_samples_val
 
-        dataset = DatasetWrapper(dataset, drop_labels=drop_labels, store_used_after=store_used)
+        indices = rand_gen.permutation(len(dataset))
+        if split == 'train':
+            dataset = torch.utils.data.Subset(dataset, indices[:n_samples_train])
+        elif split == 'val':
+            dataset = torch.utils.data.Subset(dataset, indices[-n_samples_val:])
 
-        return dataset
+    dataset = DatasetWrapper(dataset, drop_labels=drop_labels, store_used_after=store_used)
+
+    return dataset
 
 
 class Files:
@@ -326,6 +325,6 @@ class Files:
         img_pil = PIL.Image.open(self._files[index])
         img = self._transform(img_pil)
         return img
-    
+
     def __len__(self):
         return len(self._files)
