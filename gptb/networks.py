@@ -20,6 +20,7 @@ from .auxil import Resevior
 class ModelState:
     def __init__(self,
                  checkpoints_folder=None,
+                 intermediate_folder=None,
                  modules=None,
                  tensors=None,
                  arrays=None,
@@ -37,6 +38,9 @@ class ModelState:
         self.step = 0
 
         self._checkpoints_folder = checkpoints_folder
+        if intermediate_folder is None:
+            intermediate_folder = os.path.join(self._checkpoints_folder, 'intermediate')
+        self._intermediate_folder = intermediate_folder
 
         self.modules = modules
         self.tensors = tensors
@@ -75,8 +79,8 @@ class ModelState:
         else:
             if add_intermediate and (self._checkpoints_reservior is not None):
                 self.update_reservior()
-                if not os.path.isdir(os.path.join(self._checkpoints_folder, 'intermediate')):
-                    os.makedirs(os.path.join(self._checkpoints_folder, 'intermediate'))
+                if not os.path.isdir(self._intermediate_folder):
+                    os.makedirs(self._intermediate_folder)
 
             filename = os.path.join(self._checkpoints_folder, 'latest_checkpoint_{}.pt'.format(self.step))
             prev_filename = glob.glob(os.path.join(self._checkpoints_folder, 'latest_checkpoint_*.pt'))
@@ -103,7 +107,7 @@ class ModelState:
                     prev_best_filename = glob.glob(os.path.join(self._checkpoints_folder, 'checkpoint_*_best.pt'))
                     if len(prev_best_filename) > 0:
                         prev_best_filename = prev_best_filename[0]
-                        shutil.move(prev_best_filename, os.path.join(self._checkpoints_folder, 'intermediate', os.path.basename(prev_best_filename)[:-8] + '.pt'))
+                        shutil.move(prev_best_filename, os.path.join(self._intermediate_folder, os.path.basename(prev_best_filename)[:-8] + '.pt'))
 
                     prev_best_filename = glob.glob(os.path.join(self._checkpoints_folder, 'checkpoint_*_best_.pt'))
                     if len(prev_best_filename) > 0:
@@ -122,7 +126,7 @@ class ModelState:
                         shutil.move(prev_filename, os.path.join(self._checkpoints_folder, os.path.basename(prev_filename)[7:]))
                         prev_step = int(os.path.basename(prev_filename)[18:-8])
                     else:
-                        shutil.move(prev_filename, os.path.join(self._checkpoints_folder, 'intermediate', os.path.basename(prev_filename)[7:]))
+                        shutil.move(prev_filename, os.path.join(self._intermediate_folder, os.path.basename(prev_filename)[7:]))
                         prev_step = int(os.path.basename(prev_filename)[18:-3])
                     if self._checkpoints_reservior is not None:
                         if prev_step > self._checkpoints_reservior.last:
@@ -160,7 +164,7 @@ class ModelState:
                 self.tensors[tensor_name] = checkpoint['tensors'][tensor_name]
         for array_name in self.arrays.keys():
             self.arrays[array_name].frombuffer(checkpoint['arrays'][array_name])
-        self.metadata = checkpoint['metadata']
+        self.metadata.update(checkpoint['metadata'])
 
         if not checkpoint['checkpoints_reservior'] is None:
             self._checkpoints_reservior = Resevior(**checkpoint['checkpoints_reservior'])
@@ -215,7 +219,7 @@ class ModelState:
         elif os.path.isfile(os.path.join(self._checkpoints_folder, 'checkpoint_{}_best_.pt'.format(step))):
             filename = os.path.join(self._checkpoints_folder, 'checkpoint_{}_best_.pt'.format(step))
         else:
-            filename = os.path.join(self._checkpoints_folder, 'intermediate', 'checkpoint_{}.pt'.format(step))
+            filename = os.path.join(self._intermediate_folder, 'checkpoint_{}.pt'.format(step))
 
         return self.load(filename, device_id=device_id, checkpoint=checkpoint)
 
@@ -238,9 +242,9 @@ class ModelState:
 
     def list_checkpoints_steps(self):
         checkpoints_steps = []
-        if os.path.isdir(os.path.join(self._checkpoints_folder, 'intermediate')):
+        if os.path.isdir(self._intermediate_folder):
             matches = map(lambda x: re.match('^checkpoint_(\\d+)\\.pt$', x),
-                        os.listdir(os.path.join(self._checkpoints_folder, 'intermediate')))
+                          os.listdir(self._intermediate_folder))
             checkpoints_steps = sorted([int(x.groups()[0]) for x in matches if x is not None])
 
         checkpoint_filenames = glob.glob(os.path.join(self._checkpoints_folder, 'checkpoint_*_best.pt'))
@@ -249,7 +253,7 @@ class ModelState:
         return checkpoints_steps
 
     def remove_checkpoint(self, step):
-        filename = os.path.join(self._checkpoints_folder, 'intermediate', 'checkpoint_{}.pt'.format(step))
+        filename = os.path.join(self._intermediate_folder, 'checkpoint_{}.pt'.format(step))
         if os.path.isfile(filename):
             os.remove(filename)
 
@@ -727,19 +731,19 @@ def rm_tensorboard_folder(folder, logger=None):
         finish = False
         while not finish:
             finish = True
-        ps = subprocess.Popen(['ps', 'aux'], stdout=subprocess.PIPE).stdout.readlines()
-        headers = ps[0].decode("utf-8").strip().split()
-        cmd_index = headers.index('COMMAND')
-        pid_index = headers.index('PID')
-        for line in ps[1:]:
-            line = line.decode("utf-8").strip().split(None, len(headers) - 1)
-            cmd = line[cmd_index]
-            if ('tensorboard' in cmd) and (folder in cmd):
-                pid = int(line[pid_index])
-                logger.info('Killing process: {}'.format(pid))
-                logger.debug('Killed process details:'.format(' '.join(line)))
-                os.kill(pid, 9)
-                time.sleep(5)
+            ps = subprocess.Popen(['ps', 'aux'], stdout=subprocess.PIPE).stdout.readlines()
+            headers = ps[0].decode("utf-8").strip().split()
+            cmd_index = headers.index('COMMAND')
+            pid_index = headers.index('PID')
+            for line in ps[1:]:
+                line = line.decode("utf-8").strip().split(None, len(headers) - 1)
+                cmd = line[cmd_index]
+                if ('tensorboard' in cmd) and (folder in cmd):
+                    pid = int(line[pid_index])
+                    logger.info('Killing process: {}'.format(pid))
+                    logger.debug('Killed process details:'.format(' '.join(line)))
+                    os.kill(pid, 9)
+                    time.sleep(5)
                     finish = False
                     break
 
