@@ -66,7 +66,7 @@ def gen_multigrid_indices(data_shape, borders=None, scale=1):
     return indices, shuffle_indices
 
 class Images2MultiGrid:
-    def __init__(self, data_shape, borders=None, scale=1):
+    def __init__(self, data_shape, borders=None, scale=1, bgcolor=None):
 
         self._indices, self._shuffle_indices = gen_multigrid_indices(data_shape, borders, scale)
 
@@ -74,7 +74,10 @@ class Images2MultiGrid:
         self._indices = self._indices.flatten()
         self._shuffle_indices = self._shuffle_indices.flatten()
 
-        self._img = np.zeros(self._shape)
+        if bgcolor is not None:
+            self._img = np.ones(self._shape) * np.array(bgcolor)[None, None]
+        else:
+            self._img = np.zeros(self._shape)
         self(np.repeat(np.linspace(0, 1, np.prod(data_shape[:-1])), data_shape[-1]))
 
     def __call__(self, imgs):
@@ -90,7 +93,10 @@ class Images2MultiGrid:
         return self._img
 
 class Tensor2MultiGrid:
-    def __init__(self, data_shape, borders=None, scale=1, device_id='cpu'):
+    def __init__(self, data_shape, borders=None, scale=1, device_id='cpu', convert_to_numpy=False):
+
+        self._device_id = device_id
+        self._convert_to_numpy = convert_to_numpy
 
         data_shape_np = data_shape[:-3] + data_shape[-2:] + data_shape[-3:-2]
         self._indices, self._shuffle_indices = gen_multigrid_indices(data_shape_np, borders, scale)
@@ -106,16 +112,17 @@ class Tensor2MultiGrid:
         self._indices = self._indices.flatten()
         self._shuffle_indices = self._shuffle_indices.flatten()
 
-        self._img = torch.zeros(self._shape, device=device_id)
+        self._img = torch.zeros(self._shape, device=self._device_id)
         self(torch.repeat_interleave(torch.tensor(np.linspace(0, 1, np.prod(data_shape_np[:-1]), dtype=np.single), device=device_id).view(data_shape[:-3] + (1,) + data_shape[-2:]), data_shape[-3], dim=-3))  # pylint: disable=not-callable
 
     def __call__(self, imgs):
+        imgs = imgs.to(self._device_id)
         # imgs = np.moveaxis(imgs.detach().cpu().numpy(), -3, -1)
         # self._img.flat[self._indices] = imgs.flat[self._shuffle_indices]  # pylint: disable=unsupported-assignment-operation
         # imgs = torch.tensor(self._img).permute(2, 0, 1)
 
-        self._img.view(-1)[self._indices] = imgs.view(-1)[self._shuffle_indices]
-        return self._img
+        self._img.view(-1)[self._indices] = imgs.contiguous().view(-1)[self._shuffle_indices]
+        return self.last_image
 
     @property
     def shape(self):
@@ -123,29 +130,45 @@ class Tensor2MultiGrid:
 
     @property
     def last_image(self):
-        return self._img
+        img = self._img
+        if self._convert_to_numpy:
+            img = np.moveaxis(img.cpu().numpy(), 0, 2)
+        return img
 
 
 class MultiGridImagesViewer:
-    def __init__(self, data_shape, borders=None, scale=1):
-        self._grid_builder = Images2MultiGrid(data_shape, borders)
+    def __init__(self, data_shape, borders=None, scale=1, use_tensors=False):
+        if use_tensors:
+            self._grid_builder = Tensor2MultiGrid(data_shape, borders, convert_to_numpy=True)
+            width = self._grid_builder.shape[2]
+            height = self._grid_builder.shape[1]
+            channels = self._grid_builder.shape[0]
+        else:
+            self._grid_builder = Images2MultiGrid(data_shape, borders)
+            width = self._grid_builder.shape[1]
+            height = self._grid_builder.shape[0]
+            channels = self._grid_builder.shape[2]
 
         mpl_dpi = mpl.rcParams['figure.dpi']
-        self._fig = plt.figure(figsize=(self._grid_builder.shape[1] / mpl_dpi * scale,
-                                        self._grid_builder.shape[0] / mpl_dpi * scale))
-        self._ax = self._fig.add_axes((0, 0, 1, 1))
-        if self._grid_builder.shape[-1] == 1:
-            self._img_image = self._ax.imshow(self._grid_builder.last_image[..., 0])
+        self.fig = plt.figure(figsize=(width / mpl_dpi * scale,
+                                       height / mpl_dpi * scale))
+        self.ax = self.fig.add_axes((0, 0, 1, 1))
+        img = self._grid_builder.last_image
+        if channels == 1:
+            self._img_image = self.ax.imshow(img[..., 0], cmap='gray')
         else:
-            self._img_image = self._ax.imshow(self._grid_builder.last_image)
+            self._img_image = self.ax.imshow(img)
 
     def __call__(self, data):
-        if self._grid_builder.shape[-1] == 1:
-            self._img_image.set_data(self._grid_builder(data)[..., 0])
-        else:
-            self._img_image.set_data(self._grid_builder(data))
+        img = self._grid_builder(data)
+        if img.shape[-1] == 1:
+            img = img[..., 0]
+        self._img_image.set_data(img)
+        self.fig.canvas.draw()
 
-        self._fig.canvas.draw()
+    @property
+    def last_image(self):
+        return self._grid_builder.last_image
 
 
 class GifWriter:
