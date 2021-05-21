@@ -1,12 +1,15 @@
 import os
 import struct
 import glob
+import warnings
 
 import torch
 import torchvision
 import PIL
 
 import numpy as np
+import pandas as pd
+from torchvision import transforms
 
 def load_dataset(dataset_name, *args, **kwargs):
     dataset_name = dataset_name.lower()
@@ -124,7 +127,7 @@ def load_spiral(n_rounds=2,
     theta = t * n_rounds * 2 * np.pi
     data = np.stack((r * np.cos(theta), r * np.sin(theta)), axis=1)
     data += rand_gen.randn(n_samples, 2) * noise_std
-    dataset = torch.utils.data.TensorDataset(torch.tensor(data, dtype=torch.float))  # pylint: disable=not-callable
+    dataset = torch.tensor(data, dtype=torch.float)  # pylint: disable=not-callable
     return dataset
 
 def generate_spiral_line(n_rounds=2,
@@ -142,7 +145,8 @@ def generate_spiral_line(n_rounds=2,
 def load_mnist(data_folder,
                split='train',
                n_samples_val=256,
-               #  drop_labels=False,
+               drop_labels=False,
+               additional_transform=None,
                rand_seed=0,
                ):
 
@@ -150,22 +154,24 @@ def load_mnist(data_folder,
 
     if split in ['train', 'val']:
         images_filename = os.path.join(data_folder, 'train-images-idx3-ubyte')
-        # labels_filename = os.path.join(data_folder, 'train-labels-idx1-ubyte')
+        labels_filename = os.path.join(data_folder, 'train-labels-idx1-ubyte')
     else:
         images_filename = os.path.join(data_folder, 't10k-images-idx3-ubyte')
-        # labels_filename = os.path.join(data_folder, 't10k-labels-idx1-ubyte')
+        labels_filename = os.path.join(data_folder, 't10k-labels-idx1-ubyte')
 
     with open(images_filename, 'rb') as fid:
         _, _, rows, cols = struct.unpack(">IIII", fid.read(16))
         images = np.fromfile(fid, dtype=np.uint8).reshape(-1, rows, cols)
 
-    # with open(labels_filename, 'rb') as fid:
-    #     _, num = struct.unpack(">II", fid.read(8))
-    #     labels = np.fromfile(fid, dtype=np.int8)
+    with open(labels_filename, 'rb') as fid:
+        _, _ = struct.unpack(">II", fid.read(8))
+        labels = np.fromfile(fid, dtype=np.int8)
 
-    images /= 255.
+    images = images / 255.
 
-    dataset = torch.utils.data.TensorDataset(torch.tensor(images[:, None, :, :], dtype=torch.float))  # pylint: disable=not-callable
+    dataset = torch.utils.data.TensorDataset(torch.tensor(images[:, None, :, :], dtype=torch.float),  # pylint: disable=not-callable
+                                             torch.tensor(labels, dtype=torch.int),  # pylint: disable=not-callable
+                                             )
 
     if split == 'train':
         indices = rand_gen.permutation(len(dataset))[:-n_samples_val]
@@ -174,20 +180,23 @@ def load_mnist(data_folder,
         indices = rand_gen.permutation(len(dataset))[-n_samples_val:]
         dataset = torch.utils.data.Subset(dataset, indices)
 
-    # if drop_labels:
-    #     dataset = DatasetWrapper(dataset, drop_labels=drop_labels)
+    if drop_labels or (additional_transform is not None):
+        if additional_transform is not None:
+            additional_transform = torchvision.transforms.Compose(additional_transform)
+        dataset = DatasetWrapper(dataset, drop_labels=drop_labels, transform=additional_transform)
 
     return dataset
-
 
 def load_celeba(data_folder,
                 split='train',
                 crop_size=178,
                 resize_to=64,
-                target_type=('attr', 'identity', 'bbox', 'landmarks'),
+                target_type=['attr', 'identity', 'bbox', 'landmarks'],
                 use_grayscale=False,
                 drop_labels=False,
                 store_used=True,
+                normalize=False,
+                additional_transform=None,
                 download=False,
                 to_device=None,
                 ):
@@ -200,10 +209,14 @@ def load_celeba(data_folder,
     transform = [
         torchvision.transforms.CenterCrop(crop_size),
         torchvision.transforms.Resize(resize_to),
-        torchvision.transforms.ToTensor(),
         ]
     if use_grayscale:
-        transform = transform[:-1] + [torchvision.transforms.Grayscale()] + transform[-1:]
+        transform += [torchvision.transforms.Grayscale()]
+    if additional_transform is not None:
+        transform += additional_transform
+    transform += [torchvision.transforms.ToTensor()]
+    if normalize:
+        transform += [torchvision.transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
     transform = torchvision.transforms.Compose(transform)
 
     dataset = torchvision.datasets.CelebA(data_folder, split=split, target_type=target_type, transform=transform, download=download)
@@ -211,6 +224,13 @@ def load_celeba(data_folder,
     dataset = DatasetWrapper(dataset, drop_labels=drop_labels, store_used_after=store_used, to_device=to_device)
 
     return dataset
+
+def get_celeba_attr_list(data_folder):
+    with open(os.path.join(data_folder, 'list_attr_celeba.txt'), 'r') as fid:
+        fid.readline()
+        attr_list = fid.readline().split()
+    return attr_list
+
 
 
 def load_cifar10(data_folder,
@@ -266,6 +286,7 @@ def load_fixed_image_net(data_folder,
                          rand_seed=0,
                          n_samples_train=None,
                          n_samples_val=256,
+                         normalize=False,
                          additional_transform=None,
                          ):
 
@@ -282,8 +303,11 @@ def load_fixed_image_net(data_folder,
     if additional_transform is not None:
         transform += additional_transform
     transform += [torchvision.transforms.ToTensor()]
+    if normalize:
+        transform += [torchvision.transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
     transform = torchvision.transforms.Compose(transform)
 
+    warnings.filterwarnings("ignore", "(Possibly )?corrupt EXIF data", UserWarning)
     dataset = torchvision.datasets.ImageFolder(
         os.path.join(data_folder, 'train' if split in ('train', 'val') else 'val'),
         transform=transform,
