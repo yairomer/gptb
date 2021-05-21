@@ -28,7 +28,18 @@ import tqdm
 import PIL
 
 class ISCalculator:
-    def __init__(self, network_filename='/tmp/inception_v3.pth', fid_reference_filename='/tmp/fid.npz', download=True):
+    def __init__(self, network_filename=None, fid_reference_filename=None, use_home_folder=False, download=True):
+        if network_filename is None:
+            if use_home_folder:
+                network_filename = os.path.join(os.environ['HOME'], '.gptb', 'inception_v3.pth')
+            else:
+                network_filename = '/tmp/inception_v3.pth'
+        if fid_reference_filename is None:
+            if use_home_folder:
+                fid_reference_filename = os.path.join(os.environ['HOME'], '.gptb', 'fid.npz')
+            else:
+                fid_reference_filename = '/tmp/fid.npz'
+
         if download and not os.path.exists(network_filename):
             network_url = 'https://github.com/mseitzer/pytorch-fid/releases/download/fid_weights/pt_inception-2015-12-05-6726825d.pth'
             download_url_to_file(network_url, network_filename)
@@ -65,6 +76,9 @@ class ISCalculator:
                 #     features = F.adaptive_avg_pool2d(features, output_size=(1, 1))
                 features_batch = features_batch[:, :, 0, 0].cpu()
                 features.append(features_batch)
+
+        del inception_model
+        # torch.cuda.empty_cache()
 
         predictions = torch.cat(predictions, dim=0).numpy()
         features = torch.cat(features, dim=0).numpy()
@@ -507,7 +521,7 @@ def run_on_folder(
 
     img_pil = PIL.Image.open(files[0])
     img = torchvision.transforms.functional.to_tensor(img_pil)
-    batch = torch.empty((batch_size,) + img.shape[1:])
+    batch = torch.empty((batch_size,) + img.shape)
 
     def batch_generator():
         for i_file in range(n_images):
@@ -536,12 +550,14 @@ def download_url_to_file(url, filename, hash_prefix=None, progress=True):
     # download is complete. This prevents a local working checkpoint
     # being overriden by a broken download.
     dst_dir = os.path.dirname(filename)
+    if not os.path.isdir(dst_dir):
+        os.makedirs(dst_dir)
     f = tempfile.NamedTemporaryFile(delete=False, dir=dst_dir)
 
     try:
         if hash_prefix is not None:
             sha256 = hashlib.sha256()
-        with tqdm.tqdm(total=file_size, disable=not progress, unit='B', ncols=100, leave=False, unit_scale=True, unit_divisor=1024) as pbar:
+        with tqdm.tqdm(desc='Downloading {}'.format(os.path.basename(url)), total=file_size, disable=not progress, unit='B', ncols=100, leave=False, unit_scale=True, unit_divisor=1024) as pbar:
             while True:
                 buffer = u.read(8192)
                 if len(buffer) == 0:
@@ -564,14 +580,15 @@ def download_url_to_file(url, filename, hash_prefix=None, progress=True):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('path', type=str)
-    parser.add_argument('network', type=str, default='/tmp/inception_v3.pth')
-    parser.add_argument('fid_ref', type=str, default='/tmp/fid.npz')
+    parser.add_argument('--path', type=str, default='/tmp/gen_imgs/*.png')
+    parser.add_argument('--network', type=str, default='/tmp/inception_v3.pth')
+    parser.add_argument('--fid_ref', type=str, default='/tmp/fid.npz')
     parser.add_argument("--dont_download", action="store_false")
-    parser.add_argument('slices', type=int, default=10)
-    parser.add_argument('device_id', type=str, default='cuda:0')
+    parser.add_argument('--bs', type=int, default=100)
+    parser.add_argument('--slices', type=int, default=10)
+    parser.add_argument('--device_id', type=str, default='cuda:0')
 
-    args = parser.parse_args()
+    args = vars(parser.parse_args())
 
     inception_mean, inception_std, fid_score = run_on_folder(
         path=args['path'],
