@@ -8,6 +8,7 @@ from . import visualizations  # noqa F401
 from . import webaggserver  # noqa F401
 from . import config  # noqa F401
 from . import hmc  # noqa F401
+from .experiment import Experiment  # noqa F401
 from .inception import ISCalculator  # noqa F401
 from .auxil import Profiler # noqa F401
 from .auxil import set_random_state # noqa F401
