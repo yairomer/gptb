@@ -6,16 +6,49 @@ import time
 import urllib
 import tempfile
 import hashlib
+import io
+from contextlib import contextmanager
 
 import numpy as np
 import torch
 import tqdm
+from line_profiler import LineProfiler
 
-try:
-    profile_func = profile  # pylint: disable=undefined-variable
-except NameError:
-    def profile_func(func):
+
+class Profiler:
+    def __init__(self, enable=True, output_filename='./profile.txt'):
+        self._enable = enable
+        self._funcs_to_profile = []
+        self._output_filenmae = output_filename
+
+    @property
+    def enable(self):
+        return self._enable
+
+    def add_function(self, func):
+        if self.enable:
+            self._funcs_to_profile.append(func)
         return func
+
+    @contextmanager
+    def run_and_profile(self):
+        if len(self._funcs_to_profile) > 0:
+            profiler = LineProfiler()
+            for func in self._funcs_to_profile:
+                profiler.add_function(func)
+            profiler.enable_by_count()
+try:
+                yield
+            finally:
+                with io.StringIO() as str_stream:
+                    profiler.print_stats(str_stream)
+                    string = str_stream.getvalue()
+                print(f'Writing profile data to "{self._output_filenmae}"')
+                with open(self._output_filenmae, 'w') as fid:
+                    fid.write(string)
+        else:
+            yield
+
 
 class CountDowner:
     def __init__(self, interval, reset=False):
