@@ -1,8 +1,8 @@
 import os
-import sys
 import shutil
 import random
 import time
+import datetime
 import urllib
 import tempfile
 import hashlib
@@ -37,7 +37,7 @@ class Profiler:
             for func in self._funcs_to_profile:
                 profiler.add_function(func)
             profiler.enable_by_count()
-try:
+            try:
                 yield
             finally:
                 with io.StringIO() as str_stream:
@@ -50,18 +50,44 @@ try:
             yield
 
 
-class CountDowner:
-    def __init__(self, interval, reset=False):
+class Timer:
+    def __init__(self, interval, reset=True):
         self._interval = interval
-        self._last_reset = 0
+        self._end_time = 0
         if reset:
             self.reset()
 
     def __bool__(self):
-        return time.time() > self._last_reset + self._interval
+        return time.time() > self._end_time
+
+    def __str__(self):
+        timedelta = int(self._end_time - time.time())
+        if timedelta >= 0:
+            return str(datetime.timedelta(seconds=timedelta))
+        else:
+            return '-' + str(datetime.timedelta(seconds=-timedelta))
+
+    def reset(self, interval=None):
+        if interval is not None:
+            self._interval = interval
+        self._end_time = time.time() + self._interval
+
+
+class Stopper:
+    def __init__(self, reset=True):
+        self._begin = 0
+        if reset:
+            self.reset()
+
+    @property
+    def sec(self):
+        return time.time() - self._begin
+
+    def __str__(self):
+        return str(datetime.timedelta(seconds=self.sec))
 
     def reset(self):
-        self._last_reset = time.time()
+        self._begin = time.time()
 
 
 def set_random_state(random_seed):
