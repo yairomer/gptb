@@ -867,12 +867,13 @@ class EncapsulatedRandomState:
     def __init__(self, random_seed=0, devices_list=[]):
         self._random_seed = random_seed
         self._devices_list = devices_list
+        self._torch_rng_state = None
+
+    def __enter__(self):
         self._torch_rng_state = [torch.random.get_rng_state()]
         for device_id in self._devices_list:
             self._torch_rng_state.append(torch.cuda.get_rng_state(device_id))
-        torch.random.manual_seed(random_seed)
-
-    def __enter__(self):
+        torch.random.manual_seed(self._random_seed)
         return np.random.RandomState(self._random_seed)
 
     def __exit__(self, type, value, traceback):
