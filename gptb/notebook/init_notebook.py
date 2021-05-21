@@ -1,9 +1,11 @@
 import sys
 import os
+import shutil
 import time
 import glob
 import itertools
 import socket
+import pickle
 
 jupyter_frontend =  len(sys.argv) >= 1 and bool(int(sys.argv[1]))
 
@@ -23,6 +25,7 @@ import PIL
 import cv2
 import tqdm
 import skimage
+import skimage.io
 import torch
 import torchvision
 import yaml
@@ -66,6 +69,8 @@ def imshow(img, scale=1, **kwargs):
             kwargs['cmap'] = 'gray'
 
     img_image = ax.imshow(img, **kwargs)
+    ax.set_axis_off()
+    fig.canvas.draw()
 
     return fig, ax, img_image
 
