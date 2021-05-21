@@ -724,6 +724,9 @@ def rm_tensorboard_folder(folder, logger=None):
     if folder is not None and os.path.isdir(folder):
 
         ## Shutdown existing tensorboards
+        finish = False
+        while not finish:
+            finish = True
         ps = subprocess.Popen(['ps', 'aux'], stdout=subprocess.PIPE).stdout.readlines()
         headers = ps[0].decode("utf-8").strip().split()
         cmd_index = headers.index('COMMAND')
@@ -737,6 +740,9 @@ def rm_tensorboard_folder(folder, logger=None):
                 logger.debug('Killed process details:'.format(' '.join(line)))
                 os.kill(pid, 9)
                 time.sleep(5)
+                    finish = False
+                    break
+
 
         logger.info('Removing folder: "{}"'.format(folder))
         shutil.rmtree(folder)
@@ -777,7 +783,7 @@ def get_tensorboard_logger(folder,
     else:
         logger.info('Running tensorboard at port {}'.format(port))
     cmd = ['tensorboard',
-        #    '--bind_all', 
+           '--bind_all', 
            '--port', str(port),
            '--logdir', folder,
            '--samples_per_plugin', 'images=100',
