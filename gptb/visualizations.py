@@ -229,3 +229,56 @@ def fig_to_numpy(fig):
     image = np.frombuffer(fig.canvas.tostring_rgb(), dtype='uint8').reshape(fig.canvas.get_width_height()[::-1] + (3,))
 
     return image
+
+
+class SlicedViz:
+    def __init__(self, net, typical_sigma, sliced_range, ref_img, sliced_zoom_range):
+        self._net = net
+
+        self._fig, (self._sliced_ax, self._sliced_zoom_ax) = plt.subplots(1, 2, figsize=(8, 4))
+
+        ## Sliced energy
+        ## -------------
+        self._sliced_range = sliced_range
+        self._sliced_zoom_range = sliced_zoom_range
+        dir_img = torch.randn_like(ref_img) * typical_sigma
+        self._sliced_values = np.sort(np.concatenate([
+            np.linspace(-self._sliced_zoom_range, self._sliced_zoom_range, 201, dtype=np.single),
+            np.linspace(-self._sliced_range, self._sliced_range, 200, dtype=np.single),
+            ], axis=0))
+        self._sliced_imgs = ref_img + torch.from_numpy(self._sliced_values).to(ref_img.device)[:, None, None, None] * dir_img[None, :]
+
+        self._sliced_ax.set_title('Sliced energy')
+        self._sliced_ax.grid(True)
+        self._sliced_line = self._sliced_ax.plot(self._sliced_values, np.zeros_like(self._sliced_values))[0]
+        self._sliced_ax.plot(self._sliced_values, self._sliced_values ** 2 / 2, '--k')
+        self._sliced_ax.set_xlim(-self._sliced_range, self._sliced_range)
+        max_val = self._sliced_range ** 2
+        self._sliced_ax.set_ylim(-max_val / 10, max_val)
+
+        self._sliced_zoom_ax.set_title('Sliced energy')
+        self._sliced_zoom_ax.grid(True)
+        self._sliced_zoom_line = self._sliced_zoom_ax.plot(self._sliced_values, np.zeros_like(self._sliced_values))[0]
+        self._sliced_zoom_ax.plot(self._sliced_values, self._sliced_values ** 2 / 2, '--k')
+        self._sliced_zoom_ax.set_xlim(-self._sliced_zoom_range, self._sliced_zoom_range)
+        self._sliced_zoom_ax.set_ylim(-self._sliced_zoom_range ** 2 / 20, self._sliced_zoom_range ** 2 / 2)
+
+        self.update()
+
+    @property
+    def fig(self):
+        return self._fig
+
+    def update(self):
+        device_id = next(self._net.parameters()).device
+        sliced_imgs = self._sliced_imgs.to(device_id)
+
+        with torch.no_grad():
+            sliced_energy = self._net(sliced_imgs).view(self._sliced_imgs.shape[0], -1).mean(dim=1).cpu().numpy() / np.prod(self._sliced_imgs.shape[1:])
+        sliced_energy -= sliced_energy[sliced_energy.shape[0] // 2]
+
+        self._sliced_line.set_ydata(sliced_energy)
+        max_val = min(self._sliced_range ** 2 / 2, sliced_energy.max())
+        self._sliced_ax.set_ylim(-max_val / 10, max_val)
+        self._sliced_zoom_line.set_ydata(sliced_energy)
+        self._fig.canvas.draw()
