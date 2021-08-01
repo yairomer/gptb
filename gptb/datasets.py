@@ -231,7 +231,9 @@ def get_celeba_attr_list(data_folder):
         attr_list = fid.readline().split()
     return attr_list
 
-
+cifar10_mean = (0.4914, 0.4822, 0.4465)
+cifar10_std = (0.2023, 0.1994, 0.2010)
+cifar10_classes = ('plane', 'car', 'bird', 'cat', 'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
 
 def load_cifar10(data_folder,
                  split='train',
@@ -256,7 +258,7 @@ def load_cifar10(data_folder,
         transform += additional_transform
     transform += [torchvision.transforms.ToTensor()]
     if normalize:
-        transform += [torchvision.transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))]
+        transform += [transforms.Normalize(cifar10_mean, cifar10_std)]
     transform = torchvision.transforms.Compose(transform)
 
     dataset = torchvision.datasets.CIFAR10(data_folder, train=(split in ('train', 'val')), transform=transform, download=download)
@@ -274,6 +276,12 @@ def load_cifar10(data_folder,
     dataset = DatasetWrapper(dataset, drop_labels=drop_labels, store_used_after=store_used, to_device=to_device)
 
     return dataset
+
+def get_cifar10_denormalize():
+    return transforms.Normalize(
+        tuple(-m/s for m, s in zip(cifar10_mean, cifar10_std)),
+        tuple(1/s for s in cifar10_std),
+        )
 
 
 def load_fixed_image_net(data_folder,
