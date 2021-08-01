@@ -135,9 +135,24 @@ class Tensor2MultiGrid:
             img = np.moveaxis(img.cpu().numpy(), 0, 2)
         return img
 
+def gen_multi_grid(data, borders=None, scale=1, convert_to_numpy=False):
+    if isinstance(data, torch.Tensor):
+        img = Tensor2MultiGrid(data.shape, borders, scale=scale, device_id=data.device, convert_to_numpy=convert_to_numpy)(data)
+    else:
+        img = Images2MultiGrid(data.shape, borders, scale=scale)(data)
+    return img
 
 class MultiGridImagesViewer:
-    def __init__(self, data_shape, borders=None, scale=1, use_tensors=False):
+    def __init__(self, data_shape=None, borders=None, scale=1, use_tensors=None, data=None):
+        if data is not None:
+            use_tensors = isinstance(data, torch.Tensor)
+            data_shape = data.shape
+        else:
+            if use_tensors is None:
+                use_tensors = False
+            if data_shape is None:
+                raise Exception('data_shape cannot be None if no data is provided')
+
         if use_tensors:
             self._grid_builder = Tensor2MultiGrid(data_shape, borders, convert_to_numpy=True)
             width = self._grid_builder.shape[2]
@@ -153,11 +168,15 @@ class MultiGridImagesViewer:
         self.fig = plt.figure(figsize=(width / mpl_dpi * scale,
                                        height / mpl_dpi * scale))
         self.ax = self.fig.add_axes((0, 0, 1, 1))
+        self.ax.axis('off')
         img = self._grid_builder.last_image
         if channels == 1:
             self._img_image = self.ax.imshow(img[..., 0], cmap='gray')
         else:
             self._img_image = self.ax.imshow(img)
+
+        if data is not None:
+            self(data)
 
     def __call__(self, data):
         img = self._grid_builder(data)
