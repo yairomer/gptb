@@ -15,6 +15,8 @@ def fold_clip_in_place(x, min_val, max_val, momentum=None):
         x.abs_()
         x.add_(min_val)
 
+def default_msg_func(sampler, i):  # pylint: disable=unused-argument
+    return f'S:{sampler.step_size.mean().item():.2g}, A:{sampler.step_prob.mean().item():.2f}, E:{sampler.energy.mean().item(): 6g}'
 
 class HMCSampler:
     def __init__(
@@ -27,6 +29,7 @@ class HMCSampler:
             adjusted=False,
             temp=None,
             noise_ratio=1,
+            projection=None,
             clip_grad=None,
             clip_data=None,
             rand_gen=None,
@@ -38,10 +41,8 @@ class HMCSampler:
 
         if pbar_args is None:
             pbar_args = {}
-        def msg_func(sampler, i):
-            return f'S:{sampler.step_size.mean().item():.2g}, A:{sampler.step_prob.mean().item():.2f}, E:{sampler.energy.mean().item(): 6g}'
         if pbar_msg_func is None:
-            pbar_msg_func = msg_func
+            pbar_msg_func = default_msg_func
 
         self._x_shape = x.shape
         self._device_id = x.device
@@ -63,6 +64,7 @@ class HMCSampler:
         self._step_adj_factor = None
         self._temp = None
         self._noise_ratio = None
+        self._projection = None
         self._clip_grad = None
         self._clip_data = None
         self._rand_gen = rand_gen
@@ -79,6 +81,7 @@ class HMCSampler:
         self._accepted = None
         self._acceptance_rate = 0
         self._n_acceptance = 0
+        self._x_orth = None
 
         if self._rand_gen is None:
             self._rand_gen = np.random.RandomState()  # pylint: disable=no-member
@@ -94,6 +97,7 @@ class HMCSampler:
                     adjusted=adjusted,
                     temp=temp,
                     noise_ratio=noise_ratio,
+                    projection=projection,
                     clip_grad=clip_grad,
                     clip_data=clip_data,
                     use_pbar=use_pbar,
@@ -114,6 +118,7 @@ class HMCSampler:
                adjusted=None,
                temp=None,
                noise_ratio=None,
+               projection=None,
                clip_grad=None,
                clip_data=None,
                use_pbar=None,
@@ -147,6 +152,8 @@ class HMCSampler:
             self._temp = self._unsqueeze(temp)
         if noise_ratio is not None:
             self._noise_ratio = noise_ratio
+        if projection is not None:
+            self._projection = projection
         if clip_grad is not None:
             self._clip_grad = clip_grad
         if use_pbar is not None:
@@ -161,10 +168,14 @@ class HMCSampler:
         if viz_func is not None:
             self._viz_func = viz_func
 
+        if (x is not None) or (projection is not None):
+            self._update_x_orth()
+
     def _get_grad_and_energy(self):
         with torch.enable_grad():
             energy = self._model(self._x)
             grad = torch.autograd.grad(energy.sum(), self._x)[0]
+        self.project_in_place(grad)
 
         if self._clip_grad is not None:
             grad.clamp_(-self._clip_grad, self._clip_grad)  # pylint: disable=invalid-unary-operand-type
@@ -177,7 +188,10 @@ class HMCSampler:
 
     @property
     def x(self):
-        return self._x.detach()
+        x = self._x.detach()
+        if self._x_orth is not None:
+            x = x + self._x_orth
+        return x
 
     @property
     def energy(self):
@@ -223,6 +237,7 @@ class HMCSampler:
         self.update(**kwargs)
         with torch.no_grad():
             self._momentum.normal_(0, self._noise_ratio)
+            self.project_in_place(self._momentum)
 
             self._x_ref.copy_(self._x.detach())
             self._energy_ref.copy_(self._energy)
@@ -235,6 +250,7 @@ class HMCSampler:
             self._x.addcmul_(self._step_size * self._temp ** 0.5, self._momentum)
             if self._clip_data is not None:
                 fold_clip_in_place(self._x, self._clip_data[0], self._clip_data[1], self._momentum)
+            self.project_in_place(self._x)
             self._grad, self._energy = self._get_grad_and_energy()
             self._momentum.addcmul_(self._step_size / self._temp ** 0.5, self._grad, value=-0.5)
 
@@ -316,3 +332,13 @@ class HMCSampler:
         if self._use_pbar:
             pbar.close()
         return self
+
+    def project_in_place(self, data):
+        if self._projection is not None:
+            data.data.copy_(self._projection(data.data))
+
+    def _update_x_orth(self):
+        if self._projection is not None:
+            with torch.no_grad():
+                self._x_orth = self._x - self._projection(self._x)
+                self._x.subtract_(self._x_orth)
