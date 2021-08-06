@@ -23,7 +23,10 @@ import pandas as pd
 import sympy as sp
 import PIL
 import cv2
-import tqdm
+if jupyter_frontend:
+    import tqdm.notebook as tqdm
+else:
+    import tqdm
 import skimage
 import skimage.io
 import torch
@@ -36,16 +39,6 @@ if not ipy is None:
     ## Auto reload - Use %autoreload to reload packages
     ipy.magic("load_ext autoreload")
 
-
-if jupyter_frontend:
-    ## TQDM
-    def _tqdm_notebook(*args, **kwargs):
-        kwargs.pop('ncols', None)
-        return tqdm.tqdm_notebook(*args, **kwargs)
-
-
-    tqdm.tqdm_org = tqdm.tqdm
-    tqdm.tqdm = _tqdm_notebook
 
 ## Jupyter widgets
 import ipywidgets as widgets
