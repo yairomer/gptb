@@ -29,7 +29,7 @@ class HMCSampler:
             adjusted=False,
             temp=None,
             noise_ratio=1,
-            projection=None,
+            orth_projection=None,
             clip_grad=None,
             clip_data=None,
             rand_gen=None,
@@ -64,7 +64,7 @@ class HMCSampler:
         self._step_adj_factor = None
         self._temp = None
         self._noise_ratio = None
-        self._projection = None
+        self._orth_projection = None
         self._clip_grad = None
         self._clip_data = None
         self._rand_gen = rand_gen
@@ -97,7 +97,7 @@ class HMCSampler:
                     adjusted=adjusted,
                     temp=temp,
                     noise_ratio=noise_ratio,
-                    projection=projection,
+                    orth_projection=orth_projection,
                     clip_grad=clip_grad,
                     clip_data=clip_data,
                     use_pbar=use_pbar,
@@ -118,7 +118,7 @@ class HMCSampler:
                adjusted=None,
                temp=None,
                noise_ratio=None,
-               projection=None,
+               orth_projection=None,
                clip_grad=None,
                clip_data=None,
                use_pbar=None,
@@ -152,8 +152,8 @@ class HMCSampler:
             self._temp = self._unsqueeze(temp)
         if noise_ratio is not None:
             self._noise_ratio = noise_ratio
-        if projection is not None:
-            self._projection = projection
+        if orth_projection is not None:
+            self._orth_projection = orth_projection
         if clip_grad is not None:
             self._clip_grad = clip_grad
         if use_pbar is not None:
@@ -168,14 +168,17 @@ class HMCSampler:
         if viz_func is not None:
             self._viz_func = viz_func
 
-        if (x is not None) or (projection is not None):
-            self._update_x_orth()
+        if (self._orth_projection is not None) and ((x is not None) or (orth_projection is not None)):
+            with torch.no_grad():
+                self._x_orth = self._orth_projection(self._x)
 
     def _get_grad_and_energy(self):
         with torch.enable_grad():
-            energy = self._model(self._x)
+            x = self._x
+            energy = self._model(x)
             grad = torch.autograd.grad(energy.sum(), self._x)[0]
-        self.project_in_place(grad)
+        if self._orth_projection is not None:
+            grad.subtract_(self._orth_projection(grad))
 
         if self._clip_grad is not None:
             grad.clamp_(-self._clip_grad, self._clip_grad)  # pylint: disable=invalid-unary-operand-type
@@ -188,10 +191,7 @@ class HMCSampler:
 
     @property
     def x(self):
-        x = self._x.detach()
-        if self._x_orth is not None:
-            x = x + self._x_orth
-        return x
+        return self._x.detach()
 
     @property
     def energy(self):
@@ -237,7 +237,8 @@ class HMCSampler:
         self.update(**kwargs)
         with torch.no_grad():
             self._momentum.normal_(0, self._noise_ratio)
-            self.project_in_place(self._momentum)
+            if self._orth_projection is not None:
+                self._momentum.subtract_(self._orth_projection(self._momentum))
 
             self._x_ref.copy_(self._x.detach())
             self._energy_ref.copy_(self._energy)
@@ -250,7 +251,8 @@ class HMCSampler:
             self._x.addcmul_(self._step_size * self._temp ** 0.5, self._momentum)
             if self._clip_data is not None:
                 fold_clip_in_place(self._x, self._clip_data[0], self._clip_data[1], self._momentum)
-            self.project_in_place(self._x)
+            if self._orth_projection is not None:
+                self._x.add_(self._x_orth - self._orth_projection(self._x))
             self._grad, self._energy = self._get_grad_and_energy()
             self._momentum.addcmul_(self._step_size / self._temp ** 0.5, self._grad, value=-0.5)
 
@@ -332,13 +334,3 @@ class HMCSampler:
         if self._use_pbar:
             pbar.close()
         return self
-
-    def project_in_place(self, data):
-        if self._projection is not None:
-            data.data.copy_(self._projection(data.data))
-
-    def _update_x_orth(self):
-        if self._projection is not None:
-            with torch.no_grad():
-                self._x_orth = self._x - self._projection(self._x)
-                self._x.subtract_(self._x_orth)
