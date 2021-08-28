@@ -4,18 +4,18 @@ import numpy as np
 import torch
 import tqdm
 
-def fold_clip_in_place(x, min_val, max_val, momentum=None):
-    with torch.no_grad():
-        width = max_val - min_val
-        x.add_(-min_val + width)
-        x.remainder_(width * 2)
-        x.add_(-width)
-        if momentum is not None:
-            momentum.mul_(torch.sign(x))
-        x.abs_()
-        x.add_(min_val)
+# def fold_clip_in_place(x, min_val, max_val, momentum=None):
+#     with torch.no_grad():
+#         width = max_val - min_val
+#         x.add_(-min_val + width)
+#         x.remainder_(width * 2)
+#         x.add_(-width)
+#         if momentum is not None:
+#             momentum.mul_(torch.sign(x))
+#         x.abs_()
+#         x.add_(min_val)
 
-def default_msg_func(sampler, i):  # pylint: disable=unused-argument
+def default_msg_func(sampler):  # pylint: disable=unused-argument
     return f'S:{sampler.step_size.mean().item():.2g}, A:{sampler.step_prob.mean().item():.2f}, E:{sampler.energy.mean().item(): 6g}'
 
 class HMCSampler:
@@ -24,6 +24,7 @@ class HMCSampler:
             model,
             x,
             step_size=1,
+            n_leaps_range=(1, 1),
             target_prob=0.6,
             step_adj_factor=None,
             adjusted=False,
@@ -59,6 +60,7 @@ class HMCSampler:
         self._momentum_ref = torch.empty(x.shape, device=self._device_id)
 
         self._step_size = None
+        self._n_leaps_range = None
         self._adjusted = None
         self._target_prob = None
         self._step_adj_factor = None
@@ -79,6 +81,8 @@ class HMCSampler:
         self._log_step_prob = None
         self._step_prob = None
         self._accepted = None
+        self._n_steps = 0
+        self._n_leaps = 0
         self._acceptance_rate = 0
         self._n_acceptance = 0
         self._x_orth = None
@@ -92,6 +96,7 @@ class HMCSampler:
         self.update(model=model,
                     x=x,
                     step_size=step_size,
+                    n_leaps_range=n_leaps_range,
                     target_prob=target_prob,
                     step_adj_factor=step_adj_factor,
                     adjusted=adjusted,
@@ -113,6 +118,7 @@ class HMCSampler:
                model=None,
                x=None,
                step_size=None,
+               n_leaps_range=None,
                target_prob=None,
                step_adj_factor=None,
                adjusted=None,
@@ -133,13 +139,14 @@ class HMCSampler:
             self._clip_data = clip_data
         if x is not None:
             self._x = x.detach().requires_grad_(True)
-            if self._clip_data is not None:
-                fold_clip_in_place(self._x, self._clip_data[0], self._clip_data[1])
             self._grad, self._energy = self._get_grad_and_energy()
+            self._clamp()
         if step_size is not None:
             if not isinstance(step_size, torch.Tensor):
                 step_size = torch.tensor(step_size, dtype=torch.float, device=self._device_id)  # pylint: disable=not-callable
             self._step_size = self._unsqueeze(step_size)
+        if n_leaps_range is not None:
+            self._n_leaps_range = n_leaps_range
         if target_prob is not None:
             self._target_prob = target_prob
         if step_adj_factor is not None:
@@ -230,6 +237,14 @@ class HMCSampler:
         return self._accepted
 
     @property
+    def n_steps(self):
+        return self._n_steps
+
+    @property
+    def n_leaps(self):
+        return self._n_leaps
+
+    @property
     def acceptance_rate(self):
         return self._acceptance_rate
 
@@ -249,14 +264,16 @@ class HMCSampler:
         with torch.no_grad():
             self._momentum.addcmul_(self._step_size / self._temp ** 0.5, self._grad, value=-0.5)
             self._x.addcmul_(self._step_size * self._temp ** 0.5, self._momentum)
-            if self._clip_data is not None:
-                fold_clip_in_place(self._x, self._clip_data[0], self._clip_data[1], self._momentum)
-            if self._orth_projection is not None:
-                self._x.add_(self._x_orth - self._orth_projection(self._x))
             self._grad, self._energy = self._get_grad_and_energy()
             self._momentum.addcmul_(self._step_size / self._temp ** 0.5, self._grad, value=-0.5)
 
         return self
+
+    def _clamp(self):
+        if self._clip_data is not None:
+            if (self._x.min() < self._clip_data[0]) or (self._x.max() > self._clip_data[1]):
+                self._x.data.clamp_(self._clip_data[0], self._clip_data[1])
+            self._grad, self._energy = self._get_grad_and_energy()
 
     # def calc_acceptence(self, track_acceptance=None):
     #     return self
@@ -265,16 +282,21 @@ class HMCSampler:
         self._energy_diff = (self._energy - self._energy_ref) / self._temp.view(-1)
         self._kinetic_diff = self.kinetic - self.kinetic_ref
         self._log_step_prob = -self._energy_diff - self._kinetic_diff  # pylint: disable=invalid-unary-operand-type
-        self._step_prob = torch.exp(torch.clamp(self._log_step_prob, max=0)).cpu().numpy()
-        self._step_prob[np.isnan(self._step_prob)] = 0
-        self._accepted = self._rand_gen.rand(len(self._step_prob)) < self._step_prob
+        self._step_prob = torch.exp(self._log_step_prob.clamp_(max=0))
+        self._step_prob[torch.isnan(self._step_prob)] = 0
+        self._accepted = torch.rand_like(self._step_prob) < self._step_prob
 
         if self._n_acceptance > 0:
-            self._acceptance_rate = (self._acceptance_rate * self._n_acceptance + self._accepted.mean()) / (self._n_acceptance + 1)
+            self._acceptance_rate = (self._acceptance_rate * self._n_acceptance + self._accepted.float().mean()) / (self._n_acceptance + 1)
         else:
-            self._acceptance_rate = self._accepted.mean()
+            self._acceptance_rate = self._accepted.float().mean()
         self._n_acceptance += 1
 
+        return self
+
+    def reset_steps(self):
+        self._n_steps = 0
+        self._n_leaps = 0
         return self
 
     def reset_acceptance_rate(self):
@@ -293,7 +315,7 @@ class HMCSampler:
             step_adj_factor = self._step_adj_factor
         if step_adj_factor is not None:
             if self._step_size.shape[0] == 1:
-                self._step_size = self._step_size * step_adj_factor ** ((self._step_prob > self._target_prob) * 2 - 1).mean()
+                self._step_size = self._step_size * step_adj_factor ** ((self._step_prob > self._target_prob) * 2 - 1).float().mean()
             else:
                 self._step_size[self._step_prob > self._target_prob] *= step_adj_factor
                 self._step_size[self._step_prob <= self._target_prob] /= step_adj_factor
@@ -306,11 +328,16 @@ class HMCSampler:
         self._calc_acceptence()
         if self._adjusted:
             self.adjust()
+        self._clamp()
+        if self._orth_projection is not None:
+            self._x.data.add_(self._x_orth - self._orth_projection(self._x))
         self.adjust_step_size()
+        self._n_steps += 1
+        self._n_leaps += n_leaps
 
         return self
 
-    def run(self, n_steps, n_leaps_range=(1, 1), temp_list=None, **kwargs):
+    def run(self, n_steps, temp_list=None, **kwargs):
         self.update(**kwargs)
 
         pbar = range(n_steps)
@@ -318,19 +345,19 @@ class HMCSampler:
             pbar = tqdm.tqdm(pbar, total=n_steps, **self._pbar_args)
 
         last_msg = 0
+        if self._viz_func is not None:
+            self._viz_func(self)
         for i in pbar:
             if temp_list is not None:
                 self.update(temp=temp_list[i])
-            n_leaps = self._rand_gen.randint(n_leaps_range[0], n_leaps_range[1] + 1)
+            n_leaps = self._rand_gen.randint(self._n_leaps_range[0], self._n_leaps_range[1] + 1)
             self.step(n_leaps)
             if self._use_pbar and (time.time() - last_msg) > 1:
-                pbar.set_description_str(self._pbar_msg_func(self , i))
+                pbar.set_description_str(self._pbar_msg_func(self))
                 last_msg = time.time()
             if self._viz_func is not None:
-                self._viz_func(self, i)
+                self._viz_func(self)
 
-        if self._viz_func is not None:
-            self._viz_func(self, -1)
         if self._use_pbar:
             pbar.close()
         return self
