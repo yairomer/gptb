@@ -163,6 +163,8 @@ class MultiGridImagesViewer:
             width = self._grid_builder.shape[1]
             height = self._grid_builder.shape[0]
             channels = self._grid_builder.shape[2]
+        if data is not None:
+            self._grid_builder(data)
 
         mpl_dpi = mpl.rcParams['figure.dpi']
         self.fig = plt.figure(figsize=(width / mpl_dpi * scale,
@@ -174,9 +176,7 @@ class MultiGridImagesViewer:
             self._img_image = self.ax.imshow(img[..., 0], cmap='gray')
         else:
             self._img_image = self.ax.imshow(img)
-
-        if data is not None:
-            self(data)
+        self.fig.canvas.draw()
 
     def __call__(self, data):
         img = self._grid_builder(data)
@@ -243,8 +243,8 @@ class SlicedViz:
         self._sliced_zoom_range = sliced_zoom_range
         dir_img = torch.randn_like(ref_img) * typical_sigma
         self._sliced_values = np.sort(np.concatenate([
-            np.linspace(-self._sliced_zoom_range, self._sliced_zoom_range, 201, dtype=np.single),
-            np.linspace(-self._sliced_range, self._sliced_range, 200, dtype=np.single),
+            np.linspace(-self._sliced_zoom_range, self._sliced_zoom_range, 51, dtype=np.single),
+            np.linspace(-self._sliced_range, self._sliced_range, 50, dtype=np.single),
             ], axis=0))
         self._sliced_imgs = ref_img + torch.from_numpy(self._sliced_values).to(ref_img.device)[:, None, None, None] * dir_img[None, :]
 
@@ -274,7 +274,7 @@ class SlicedViz:
         sliced_imgs = self._sliced_imgs.to(device_id)
 
         with torch.no_grad():
-            sliced_energy = self._net(sliced_imgs).view(self._sliced_imgs.shape[0], -1).mean(dim=1).cpu().numpy() / np.prod(self._sliced_imgs.shape[1:])
+            sliced_energy = self._net(sliced_imgs).view(sliced_imgs.shape[0], -1).mean(dim=1).cpu().numpy() / np.prod(self._sliced_imgs.shape[1:])
         sliced_energy -= sliced_energy[sliced_energy.shape[0] // 2]
 
         self._sliced_line.set_ydata(sliced_energy)
