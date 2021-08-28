@@ -33,6 +33,7 @@ import torch
 import torchvision
 import yaml
 
+mpl.style.use('seaborn')
 mpl_dpi = mpl.rcParams['figure.dpi']
 
 if not ipy is None:
