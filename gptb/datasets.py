@@ -8,7 +8,6 @@ import torchvision
 import PIL
 
 import numpy as np
-import pandas as pd
 from torchvision import transforms
 
 def load_dataset(dataset_name, *args, **kwargs):
@@ -24,7 +23,7 @@ def load_dataset(dataset_name, *args, **kwargs):
     elif dataset_name == 'fixed_imagenet':
         dataset = load_fixed_image_net(*args, **kwargs)
     elif dataset_name == 'files':
-        dataset = Files(*args, **kwargs)
+        dataset = load_files(*args, **kwargs)
     else:
         raise Exception('Unknown dataset: "{}"'.format(dataset_name))
     return dataset
@@ -336,8 +335,54 @@ def load_fixed_image_net(data_folder,
     return dataset
 
 
+def load_files(files,
+               split=None,
+               n_samples_val=256,
+               n_samples_test=256,
+               minimal_width=None,
+               minimal_height=None,
+               resize_to=None,
+               additional_transform=None,
+               store_used=False,
+               to_device=None,
+               rand_seed=0,
+               ):
+
+
+    transform = []
+    if resize_to is not None:
+        transform += [torchvision.transforms.Resize(resize_to)]
+    if additional_transform is not None:
+        transform += additional_transform
+    dataset = Files(files,
+                    minimal_width=minimal_width,
+                    minimal_height=minimal_height,
+                    additional_transform=transform,
+                    fake_label=0,
+                    )
+
+
+    rand_gen = np.random.RandomState(rand_seed)  # pylint: disable=no-member
+    indices = np.arange(len(dataset))
+    rand_gen.shuffle(indices)
+    indices_train = indices[:-(n_samples_val + n_samples_test)]
+    indices_val = indices[-(n_samples_val + n_samples_test):-n_samples_test]
+    indices_test = indices[-n_samples_test:]
+    if split == 'train':
+        dataset = torch.utils.data.Subset(dataset, indices_train)
+    elif split == 'val':
+        dataset = torch.utils.data.Subset(dataset, indices_val)
+    elif split == 'test':
+        dataset = torch.utils.data.Subset(dataset, indices_test)
+
+    dataset = DatasetWrapper(dataset, drop_labels=True, store_used_after=store_used, to_device=to_device)
+
+    return dataset
+
+
 class Files:
-    def __init__(self, files, minimal_width=None, minimal_height=None):
+    def __init__(self, files, minimal_width=None, minimal_height=None, additional_transform=None, fake_label=None):
+        self._fake_label = fake_label
         self._files = glob.glob(files)
         self._files.sort()
         if (minimal_width is not None) or (minimal_height is not None):
@@ -351,12 +396,20 @@ class Files:
                 if (img_shape[1] >= minimal_height) and (img_shape[0] >= minimal_width):
                     files.append(img_file)
             self._files = files
-        self._transform = torchvision.transforms.ToTensor()
+
+        transform = []
+        if additional_transform is not None:
+            transform += additional_transform
+        transform += [torchvision.transforms.ToTensor()]
+        self._transform = torchvision.transforms.Compose(transform)
 
     def __getitem__(self, index):
         img_pil = PIL.Image.open(self._files[index])
         img = self._transform(img_pil)
-        return img
+        if self._fake_label is not None:
+            return img, self._fake_label
+        else:
+            return img
 
     def __len__(self):
         return len(self._files)
